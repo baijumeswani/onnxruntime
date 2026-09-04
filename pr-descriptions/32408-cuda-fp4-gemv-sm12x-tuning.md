@@ -1,25 +1,26 @@
-# Tune FP4 GEMV scheduling for low-SM-count SM121 GPUs
+# Tune FP4 GEMV scheduling for the 48-SM SM121 GPU
 
 Pull request: [microsoft/onnxruntime#32408](https://github.com/microsoft/onnxruntime/pull/32408)
 
 ## Description
 
 Tune the tensor-core GEMV decomposition used by
-`MatMulBlockQuantizedFp4Weight` for low-SM-count SM121 GPUs.
+`MatMulBlockQuantizedFp4Weight` for the qualified 48-SM SM121 GPU.
 
 The existing H200-oriented selector can provide insufficient K parallelism for
 specific wide-grid and long-reduction decode shapes on SM121. The new selector
 uses `KSplit=16, ColTiles=1` only when all of these conditions hold:
 
 - compute capability is exactly 12.1;
-- the device has at most 64 SMs;
+- the device has exactly 48 SMs;
 - M is at most 16;
 - K contains at least 40 128-element windows;
 - the shape either provides four wide-grid waves or has at least 128 K windows;
 - the wide output grid provides fewer than eight waves.
 
-SM120, other SM12x minors, M above 16, short reductions, narrow attention
-grids, and already-saturated output grids retain the generic selector.
+SM120, other SM12x minors, other SM counts, M above 16, short reductions,
+narrow attention grids, and already-saturated output grids retain the generic
+selector.
 
 ## Performance
 
@@ -66,5 +67,6 @@ less-than-eight-wave rule.
   --gtest_filter=MatMulBlockQuantizedFp4WeightOpTest.*`
   (19 selector and FP16/BF16 operator tests passed)
 - Exact and ragged KSplit16 numerical coverage at K=2048 and K=2304
-- Selector boundaries at M=16/17/32, 64/65 SMs, SM120/SM121, K-window floor,
-  narrow attention grids, and the eight-wave output-grid threshold
+- Selector boundaries at M=16/17/32, 47/48/49/64/65 SMs, SM120/SM121, both
+  K-window floors, narrow attention grids, and the eight-wave output-grid
+  threshold
