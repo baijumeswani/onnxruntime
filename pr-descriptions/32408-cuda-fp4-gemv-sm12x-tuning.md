@@ -70,3 +70,18 @@ less-than-eight-wave rule.
 - Selector boundaries at M=16/17/32, 47/48/49/64/65 SMs, SM120/SM121, both
   K-window floors, narrow attention grids, and the eight-wave output-grid
   threshold
+
+## Suggested response to review
+
+Review comment:
+[discussion_r3929758410](https://github.com/microsoft/onnxruntime/pull/32408#discussion_r3929758410)
+
+> Thanks for the SM120 measurements. I restricted the override to the measured
+> 48-SM SM121 device, so SM120 and every other SM count retain the original
+> selector.
+>
+> The expanded SM121 sweep also found regressions at M=32, on attention-sized
+> grids, at short K, and on narrow grids below 128 K windows. Those cases now
+> retain the generic schedule. The remaining qualified cases show 2.6% to
+> 17.2% lower end-to-end ORT `Run()` latency, with selector boundary tests and
+> exact and ragged KSplit16 numerical coverage.
