@@ -85,3 +85,30 @@ Review comment:
 > retain the generic schedule. The remaining qualified cases show 2.6% to
 > 17.2% lower end-to-end ORT `Run()` latency, with selector boundary tests and
 > exact and ragged KSplit16 numerical coverage.
+
+## Suggested qualification follow-up
+
+> Additional qualification was run on the final 48-SM SM121 selector using an
+> explicit shared CUDA stream. Each arm used three alternating process rounds,
+> with 100 warmups and 1,000 measured ORT `Run()` calls per round.
+>
+> | Case | M | Latency reduction |
+> |---|---:|---:|
+> | 17408x5120 gate/up | 1 / 8 / 16 | 16.9% / 9.3% / 8.0% |
+> | 5120x17408 down | 1 / 8 / 16 | 3.9% / 5.4% / 4.6% |
+> | Four-wave wide grid, 64-127 K windows | 1 / 8 | 4.2% to 10.0% |
+>
+> Negative controls showed why the final guards are needed:
+>
+> | Excluded case | Impact from forced `16/1` |
+> |---|---:|
+> | Attention-sized grids | 4% to 12% slower |
+> | K=2048 | about 31% slower |
+> | Narrow grid at 64 K windows, M=8 | 7.7% slower |
+> | M=32 | 35% to 62% slower |
+>
+> No-override runs followed the expected selector arm for every qualified and
+> excluded case. Randomized activations and varying block scales matched within
+> one FP16 ULP. The FP4 CUDA suite passes 19/19 tests, including exact and
+> ragged KSplit16 numerics and boundaries for architecture, SM count, M, K
+> windows, and output-grid waves.
