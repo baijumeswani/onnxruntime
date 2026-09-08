@@ -115,6 +115,11 @@ matched-acceptance comparisons.
 - The same 13 tests passed with `--gtest_shuffle --gtest_random_seed=2`
 - Forced FP16 and BF16 ragged KSplit32 numerical coverage at M=8, N=17,
   K=2112 in a fresh subprocess
+- The forced subprocess explicitly sets `ORT_FP8_GEMV_MMA=1` and
+  `ORT_FP8_GEMV_MAX_M=32`, preventing inherited environment variables from
+  silently selecting scalar GEMV or dequantize/GEMM
+- CUDA availability is checked in the parent process, so no-GPU environments
+  report the forced execution test as skipped rather than passed
 - Selector boundaries for SM120/SM121, 47/48/49 SMs, M=8/9/16, both N floors,
   both K-window floors, launch-geometry-equivalent N values, measured
   vocabulary-sized outputs, and representative excluded shapes
@@ -169,5 +174,18 @@ Review comment:
 > target-forward counts, and tokens per target forward matched between arms.
 >
 > The FP8 suite passes 13/13 tests in normal and shuffled order, including
-> forced FP16/BF16 ragged KSplit32 coverage. No-override microbenchmarks followed
-> the expected selector route and all full output tensors matched.
+> forced FP16/BF16 ragged KSplit32 coverage. The child process explicitly
+> enables tensor-core GEMV with M up to 32, and the parent reports unavailable
+> CUDA environments as skipped. No-override microbenchmarks followed the
+> expected selector route and all full output tensors matched.
+
+## Suggested response to follow-up review
+
+> Addressed both remaining test issues. The forced child process now sets
+> `ORT_FP8_GEMV_MMA=1` and `ORT_FP8_GEMV_MAX_M=32`, so inherited environment
+> variables cannot silently route the test through scalar GEMV or
+> dequantize/GEMM.
+>
+> `HasCudaEnvironment(800)` is now checked before the parent spawns the child.
+> A machine without a usable CUDA device therefore reports the outer test as
+> skipped instead of interpreting the child's successful skip exit as a pass.
