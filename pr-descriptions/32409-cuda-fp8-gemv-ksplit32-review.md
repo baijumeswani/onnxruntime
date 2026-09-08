@@ -1,58 +1,65 @@
-# Review feedback for FP8 GEMV KSplit32 scheduling
+# Follow-up review for FP8 GEMV KSplit32 scheduling
 
 Pull request: [microsoft/onnxruntime#32409](https://github.com/microsoft/onnxruntime/pull/32409)
 
-Reviewed head: `88ea12b05af3f534d652c994beebd0df5398a32a`
+Reviewed head: `da238410bb8906c43fa662ee18f980053f4b1335`
 
 ## Verdict
 
-Do not approve yet. The implementation appears correct, and the earlier
-KSplit32 shared-memory instantiation issue is fixed, but the performance
-selector is broader than the demonstrated qualification.
+The previous production and performance concerns are resolved. The production
+CUDA implementation looks correct and appropriately qualified. Approval is
+recommended after two small fixes make the forced KSplit32 test hermetic and
+ensure no-GPU runs are reported as skipped.
 
-## Finding: KSplit32 applies to already saturated output grids
+## Remaining findings
+
+### 1. The forced test can silently execute another path
 
 File:
-`onnxruntime/contrib_ops/cuda/math/matmul_block_scaled_fp8_tiling.h:27-30`
+`onnxruntime/test/contrib_ops/matmul_block_scaled_fp8_test.cc:124-129`
 
-The wide-output condition has only lower bounds on N and K windows. On the
-targeted SM121/48-SM device, it therefore changes shapes such as
-`M=1, N=248320, K=5120` from KSplit8 to KSplit32. That shape launches 15,520
-output blocks, more than 323 waves across 48 SMs, so it does not lack
-inter-block parallelism.
+The subprocess inherits environment variables that the test does not
+explicitly override. If `ORT_FP8_GEMV_MMA=0`, the test uses the scalar GEMV
+path. If `ORT_FP8_GEMV_MAX_M` is below 8, the operator can use the
+dequantize/GEMM path. Both paths can produce the expected output without
+executing the KSplit32 kernel that this test is intended to cover.
 
-KSplit32 instead increases each block from 256 to 1,024 threads, expands its
-reduction storage from 4 KiB to 16 KiB, and performs a 32-way rather than
-8-way reduction. This is a plausible regression for vocabulary/lm-head-sized
-outputs and conflicts with the generic selector's rationale that wide N
-should use fewer warps.
+Add these values to the child environment:
 
-Before approval, do one of the following:
+```cpp
+{"ORT_FP8_GEMV_MMA", "1"},
+{"ORT_FP8_GEMV_MAX_M", "32"},
+```
 
-- cap the override based on output-block or grid waves;
-- restrict it to the specifically qualified shapes; or
-- provide GB10 negative-control measurements showing that KSplit32 remains
-  beneficial for very wide outputs such as the model's lm-head dimension.
+### 2. A no-GPU run reports a pass instead of a skip
 
-The threshold boundaries also need justification. `N=16383` and `N=16384`
-both launch 1,024 blocks, but the selector jumps from KSplit8 to KSplit32.
-Likewise, `N=5119` and `N=5120` both launch 320 blocks but switch from
-KSplit16 to KSplit32. A launch-geometry-based threshold would generalize more
-coherently unless these are intentional exact model-shape boundaries.
+File:
+`onnxruntime/test/contrib_ops/matmul_block_scaled_fp8_test.cc:130-140`
 
-## Correctness and code quality
+CUDA availability is checked only in the child process. `GTEST_SKIP()` exits
+that process successfully, so the parent sees `std::system(...) == 0` and
+reports the outer test as passed even though KSplit32 was not exercised.
 
-The CUDA implementation itself looks sound:
+Check `HasCudaEnvironment(800)` before spawning the child so the outer test
+correctly reports a skip when no usable CUDA device is available.
 
-- KSplit32 instantiates only `<32,1>`, avoiding the invalid `<32,4>`
-  specialization and its 64 KiB static shared-memory requirement.
-- The reachable KSplit32 kernel uses 16 KiB of shared memory.
-- Surplus warps and ragged K windows are handled correctly.
-- A real forced KSplit32 test covers FP16 and BF16 execution.
-- The forced KSplit32 test and the complete 13-test FP8 operator suite passed
-  in Linux CUDA CI.
+## Resolution of previous concerns
 
-At review time, the PR description was empty, so it did not document benchmark
-methodology, positive results, or negative-control coverage for the selected
-region. The failed WebGPU plugin check and cancelled web build also remained
-unresolved.
+| Previous concern | Status |
+|---|---|
+| KSplit32 instantiated invalid `<32,4>` with 64 KiB shared memory | Resolved: dispatch directly instantiates only `<32,1>` |
+| KSplit32 had only host-side selector coverage | Resolved, subject to the hermeticity fixes above: a forced FP16/BF16 execution test exists |
+| Raw-N thresholds split shapes with identical launch geometry | Resolved: thresholds now use `ceil(N / 16)` output blocks |
+| Already-saturated or lm-head grids could regress | Resolved: measurements through `N=248320` show 3.6% to 6.5% improvement, including 323 output waves |
+| The heuristic was too broad across architectures and M values | Resolved: it is restricted to SM121, exactly 48 SMs, and M at most 8 |
+| Performance rationale and negative controls were missing | Resolved: the PR description now documents methodology, boundaries, exclusions, kernel results, and whole-model results |
+
+## Additional assessment
+
+No new correctness, memory-safety, ABI/API, or production code-quality issue
+was found in the rebased diff. The launch-geometry thresholds and expanded
+selector tests cover the important boundary cases.
+
+At review time, most CI jobs for the rebased head were still running. The
+Optional Lint failure was unrelated to the change: the misspell action's
+Debian image rejected expired repository metadata.
